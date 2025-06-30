@@ -1,9 +1,6 @@
 package com.cleox.quickcart.user_service_api.entity;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.OneToOne;
+import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -31,8 +28,6 @@ public class User {
     @Column(name = "active_status",columnDefinition = "TINYINT")
     private  boolean activeStatus;
 
-    @Column(name = "otp",nullable = false, length = 80)
-    private  int OTP;
 
     @OneToOne(mappedBy = "user")
     private ShippingAddress shippingAddress;
@@ -42,6 +37,9 @@ public class User {
 
     @OneToOne(mappedBy = "user")
     private UserAvatar userAvatar;
+
+    @OneToOne(mappedBy = "systemUser",fetch = FetchType.EAGER,cascade = CascadeType.REMOVE)
+    private Otp otp;
 
 
 }
