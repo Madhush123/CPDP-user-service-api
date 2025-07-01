@@ -14,16 +14,26 @@ import com.cleox.quickcart.user_service_api.service.EmailService;
 import com.cleox.quickcart.user_service_api.service.UserService;
 import com.cleox.quickcart.user_service_api.util.FileDataExtractor;
 import com.cleox.quickcart.user_service_api.util.OtpGenerator;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
+import org.keycloak.admin.client.resource.UserResource;
+import org.keycloak.jose.jwk.JWK;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 //import org.keycloak.representations.account.UserRepresentation;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.util.*;
@@ -192,38 +202,214 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public Object userLogin(UserLoginRequestDto dto) {
-        return null;
+    public Object userLogin(UserLoginRequestDto request) {
+        try{
+            Optional<User> selectedUserObj=systemUserRepo.findByUsername(request.getUsername());
+            User systemUser=selectedUserObj.get();
+            if(!systemUser.getIsEmailVerified()){
+                Otp selectedOtpObj=systemUser.getOtp();
+                if(selectedOtpObj.getAttempts()>=5){
+                    String code=otpGenerator.generateOtp(4);
+
+                    emailService.sendUserSignupVerificationCode(systemUser.getUsername(),
+                            "Verify Your Email Address for Cleox Access",code);
+
+                    selectedOtpObj.setAttempts(0);
+                    selectedOtpObj.setCode(code);
+                    selectedOtpObj.setCreatedDate(new Date());
+                    otpRepo.save(selectedOtpObj);
+
+                    throw new TooManyRequestException("Too many unsuccessful attempts.New OTP sent and please use it");
+                }
+                emailService.sendUserSignupVerificationCode(systemUser.getUsername(),
+                        "Verify Your Email Address for Cleox Access",selectedOtpObj.getCode());
+                throw new RedirectionException("Your email has not been verified. Please verify your email.");
+            }else{
+                MultiValueMap<String,String> requestBody=new LinkedMultiValueMap<>();
+                requestBody.add("client_id", clientId);
+                requestBody.add("grant_type", OAuth2Constants.PASSWORD);
+                requestBody.add("username", request.getUsername());
+                requestBody.add("client_secret",secret);
+                requestBody.add("password",request.getPassword());
+                HttpHeaders headers=new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+                RestTemplate restTemplate=new RestTemplate();
+                ResponseEntity<Object> response=restTemplate.postForEntity(keyClockApiUrl,requestBody,Object.class);
+                return response.getBody();
+
+            }
+        } catch (Exception e) {
+            System.out.println(e);
+
+            if(e instanceof RedirectionException){
+                throw  new RedirectionException("Your Email has not been verified. Please verify your email.");
+
+            } else if (e instanceof TooManyRequestException) {
+                throw new TooManyRequestException("Too many unsuccessful attempts. New OTP sent and please verify your email.");
+            }else {
+                throw new UnauthorizedException("Invalid username or password.Please double-check your username and password");
+            }
+        }
+
+
     }
 
     @Override
     public List<UserResponseDto> findUserPaginate(String searchText, int page, int size) {
-        return List.of();
+
+        try{
+            Keycloak keycloak=keycloakUtil.getKeycloakInstance();
+
+            //Calculate the first result index based on the page and size
+            int firstResult=page*size;
+
+            //Search for users by email using Keycloak's user search
+            List<UserRepresentation> users=keycloak.realm(realm).users()
+                    .search(searchText,firstResult,size);
+
+            //Map the retrieved UserRepresentation objects to ResponseUserDto objects
+            List<UserResponseDto> responseUserDtos=new ArrayList<>();
+            for(UserRepresentation user:users){
+                UserResponseDto userResponseDto=mapToResponseUserDto(user);
+                responseUserDtos.add(userResponseDto);
+            }
+            return responseUserDtos;
+        }catch (Exception e){
+            throw  new RuntimeException("Error occurred while searching users",e);
+        }
+
     }
 
     @Override
     public void resend(String email) {
+        try{
+            Optional<User> selectedUserObj=systemUserRepo.findByUsername(email);
+            if(selectedUserObj.isEmpty()){
+                throw new EntryNotFoundException("Unable to find any user associated with this email");
+            }
+            User systemUser=selectedUserObj.get();
+            if(systemUser.getIsEmailVerified()){
+                throw new DuplicateEntryException("The Email is already verified");
+            }
 
+            Otp selectedOtpObj=systemUser.getOtp();
+            if(selectedOtpObj.getAttempts()>=5){
+                String code=otpGenerator.generateOtp(4);
+
+                emailService.sendUserSignupVerificationCode(email,
+                        "Verify Your Email Address for Cleox Access",code);
+
+                selectedOtpObj.setAttempts(0);
+                selectedOtpObj.setCode(code);
+                selectedOtpObj.setCreatedDate(new Date());
+                otpRepo.save(selectedOtpObj);
+
+                throw  new TooManyRequestException("Too many unsuccessful attempts.New OTP sent and please verify your email.");
+
+            }
+            emailService.sendUserSignupVerificationCode(systemUser.getUsername(),
+                    "Verify Your Email Address for Cleox Access",selectedOtpObj.getCode());
+        }catch (Exception e){
+            if(e instanceof DuplicateEntryException){
+                throw new DuplicateEntryException("The Email is already verified");
+            } else if (e instanceof TooManyRequestException) {
+                throw new TooManyRequestException("Too many unsuccessful attempts.New OTP sent and please verify your email.");
+
+            } else if (e instanceof EntryNotFoundException) {
+                throw new EntryNotFoundException("Unable to find any user associated with this email");
+            }else {
+                throw new UnauthorizedException("Invalid username or password.Please double-check your email.");
+            }
+        }
     }
 
     @Override
     public void forgotPasswordSendVerificationCode(String email) {
+         Optional<User> selectedUserObj=systemUserRepo.findByUsername(email);
+         if(selectedUserObj.isEmpty()){
+             throw new EntryNotFoundException("Unable to find any user associated with this email");
+         }
+         User systemUser=selectedUserObj.get();
+         Keycloak keycloak=null;
+         keycloak=keycloakUtil.getKeycloakInstance();
+         UserRepresentation existingUser=keycloak.realm(realm).users().search(email).stream()
+                 .findFirst().orElse(null);
+         if(existingUser==null){
+             throw new EntryNotFoundException("Unable to find any user associated with this email");
+         }
+
+         Otp selectedOtpObj=systemUser.getOtp();
+         String code=otpGenerator.generateOtp(4);
+         selectedOtpObj.setCode(code);
+
+         selectedOtpObj.setCreatedDate(new Date());
+         otpRepo.save(selectedOtpObj);
+
+         try {
+             emailService.sendPasswordResetVerificationCode(systemUser.getUsername(),
+                     "Verify Your Email Address for Cleox Access",selectedOtpObj.getCode());
+
+
+         }catch (Exception e){
+             throw new UnauthorizedException("Invalid username or password.Please double-check your email.");
+         }
 
     }
 
     @Override
     public boolean verifyReset(String otp, String email) {
+        try{
+            Optional<User> selectedUserObj=systemUserRepo.findByUsername(email);
+            if(selectedUserObj.isEmpty()){
+                throw new EntryNotFoundException("Unable to find any user associated with this email");
+            }
+            User systemUser=selectedUserObj.get();
+            Otp selectedOtpObj=systemUser.getOtp();
+
+            if(selectedOtpObj.getCode().equals(otp)){
+                return true;
+            }
+        }catch (Exception e){
+            if(e instanceof EntryNotFoundException){
+                throw new EntryNotFoundException("Unable to find any user associated with this email");
+
+            }else {
+                throw new InternalServerException("Something went wrong please try again later.");
+            }
+        }
         return false;
     }
 
     @Override
     public boolean passwordReset(UserPasswordResetRequestDto dto) {
-        return false;
+        Optional<User> selectedUserObj=systemUserRepo.findByUsername(dto.getEmail());
+        if(selectedUserObj.isPresent()){
+            User systemUser=selectedUserObj.get();
+            Otp selectedOtpObj=systemUser.getOtp();
+            Keycloak keycloak=keycloakUtil.getKeycloakInstance();
+            List<UserRepresentation> keycloakUsers=keycloak.realm(realm).users().search(systemUser.getUsername());
+            if(!keycloakUsers.isEmpty() && selectedOtpObj.getCode().equals(dto.getCode())){
+                UserRepresentation keycloakUser=keycloakUsers.get(0);
+                UserResource userResource=keycloak.realm(realm).users().get(keycloakUser.getId());
+                CredentialRepresentation newPassword=new CredentialRepresentation();
+                newPassword.setType(CredentialRepresentation.PASSWORD);
+                newPassword.setValue(dto.getPassword());
+                newPassword.setTemporary(false);
+                userResource.resetPassword(newPassword);
+                return true;
+            }
+            throw new BadRequestException("Something went wrong with the OTP, Please try again later.");
+        }
+        throw new EntryNotFoundException("Unable to find any user associated with this email");
     }
 
     @Override
     public String getUserId(String email) {
-        return "";
+        Optional<User> byEmail=systemUserRepo.findByUsername(email);
+        if(byEmail.isEmpty()){
+            throw new EntryNotFoundException("User was not found.");
+        }
+        return byEmail.get().getUserId();
     }
 
     private UserRepresentation mapUserRep(UserRequestDto user) {
@@ -241,5 +427,16 @@ public class UserServiceImpl implements UserService {
         creds.add(cred);
         userRep.setCredentials(creds);
         return userRep;
+    }
+
+    private UserResponseDto mapToResponseUserDto(UserRepresentation user) {
+        return UserResponseDto.builder()
+                .firstName(user.getUsername())
+                .lastName(user.getLastName())
+                .username(user.getUsername())
+                .activeStatus(false)
+                .avatar(null)
+                .billingAddress(null)
+                .build();
     }
 }

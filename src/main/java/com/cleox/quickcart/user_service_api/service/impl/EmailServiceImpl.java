@@ -1,5 +1,6 @@
 package com.cleox.quickcart.user_service_api.service.impl;
 
+import com.amazonaws.services.s3.AmazonS3Client;
 import com.cleox.quickcart.user_service_api.service.EmailService;
 import com.cleox.quickcart.user_service_api.util.EmailTemplateHelper;
 import com.sendgrid.*;
