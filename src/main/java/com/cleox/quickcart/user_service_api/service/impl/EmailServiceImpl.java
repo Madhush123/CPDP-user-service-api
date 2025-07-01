@@ -72,6 +72,6 @@ public class EmailServiceImpl implements EmailService {
 
         }
 
-        return false;
+        return true;
     }
 }

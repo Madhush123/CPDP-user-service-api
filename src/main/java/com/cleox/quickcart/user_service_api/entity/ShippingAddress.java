@@ -6,11 +6,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@Entity(name="shipping_addresses")
+@Entity
 @Getter
 @Setter
 @AllArgsConstructor
 @NoArgsConstructor
+@Table(name="shipping_addresses")
 public class ShippingAddress {
     @Id
     @Column(name = "address_id",nullable = false, unique = true,length = 80)

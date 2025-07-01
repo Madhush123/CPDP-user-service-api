@@ -26,7 +26,7 @@ public class Otp {
     private Date createdDate;
 
     @Column(name = "is_verified",nullable = false,columnDefinition = "TINYINT")
-    private boolean isVerified;
+    private Boolean isVerified;
 
     @Column(name = "attempts",nullable = false)
     private Integer attempts;
