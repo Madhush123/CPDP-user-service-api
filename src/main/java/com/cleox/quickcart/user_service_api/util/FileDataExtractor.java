@@ -11,7 +11,7 @@ import java.sql.SQLException;
 
 @Service
 public class FileDataExtractor {
-    public CommonFileSavedSimpleDataDto toStringDataObject(CommonFileSavedSimpleDataDto dto){
+    public CommonFileSavedSimpleDataDto toStringDataObject(CommonFileSavedBinaryDataDTO dto){
         try {
             String hash;
             String filename;
@@ -19,7 +19,7 @@ public class FileDataExtractor {
             StringBuffer buf = new StringBuffer();
             String temp;
             BufferedReader bufReader = null;
-            bufReader = new BufferedReader(new InputStreamReader(dto.getHash().getBinaryStream()));
+            bufReader = new BufferedReader(new InputStreamReader(dto.getHash() .getBinaryStream()));
             while ((temp = bufReader.readLine()) != null) {
                 buf.append(temp);
             }

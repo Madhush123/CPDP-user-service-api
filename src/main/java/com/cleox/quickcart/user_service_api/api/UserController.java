@@ -71,7 +71,7 @@ public class UserController {
         );
     }
 
-    @PostMapping(path = {"/forgot-password-request-code"},params = {"email"})
+    @PostMapping(path = {"/forgot-password-request"},params = {"email"})
     public ResponseEntity<StandardResponseDto> forgotPasswordSendVerificationCode(@RequestParam String email)throws IOException {
         userService.forgotPasswordSendVerificationCode(email);
         return new ResponseEntity<>(
